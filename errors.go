@@ -11,6 +11,8 @@ import (
 )
 
 // SafeToRetry checks if the err is guaranteed to have occurred before sending any data to the server.
+
+// SafeToRetry 检查错误是否保证发生在发送任何数据到服务器之前。
 func SafeToRetry(err error) bool {
 	if e, ok := err.(interface{ SafeToRetry() bool }); ok {
 		return e.SafeToRetry()
@@ -20,6 +22,9 @@ func SafeToRetry(err error) bool {
 
 // Timeout checks if err was was caused by a timeout. To be specific, it is true if err was caused within pgconn by a
 // context.Canceled, context.DeadlineExceeded or an implementer of net.Error where Timeout() is true.
+
+// Timeout 检查错误是否由超时引起。具体来说，如果错误是在 pgconn 内部由 context.Canceled、context.DeadlineExceeded 或 net.Error 的
+// 实现(其中 Timeout() 为 true) ，则此检查结果为 true。
 func Timeout(err error) bool {
 	var timeoutErr *errTimeout
 	return errors.As(err, &timeoutErr)
@@ -28,6 +33,9 @@ func Timeout(err error) bool {
 // PgError represents an error reported by the PostgreSQL server. See
 // http://www.postgresql.org/docs/11/static/protocol-error-fields.html for
 // detailed field description.
+
+// PgError 代表 PostgreSQL 服务器报告的错误。有关详细的字段描述，请参阅
+// http://www.postgresql.org/docs/11/static/protocol-error-fields.html。
 type PgError struct {
 	Severity         string
 	Code             string
@@ -108,6 +116,9 @@ func (e *parseConfigError) Unwrap() error {
 
 // preferContextOverNetTimeoutError returns ctx.Err() if ctx.Err() is present and err is a net.Error with Timeout() ==
 // true. Otherwise returns err.
+
+// preferContextOverNetTimeoutError 返回 ctx.Err()，如果 ctx.Err() 存在并且 err 是一个 net.Error 且 Timeout() == true。
+// 否则返回 err。
 func preferContextOverNetTimeoutError(ctx context.Context, err error) error {
 	if err, ok := err.(net.Error); ok && err.Timeout() && ctx.Err() != nil {
 		return &errTimeout{err: ctx.Err()}
@@ -141,6 +152,9 @@ func (e *pgconnError) Unwrap() error {
 
 // errTimeout occurs when an error was caused by a timeout. Specifically, it wraps an error which is
 // context.Canceled, context.DeadlineExceeded, or an implementer of net.Error where Timeout() is true.
+
+// errTimout 发生在错误由超时引起的。具体来说，它包装了一个错误，该错误是 context.Canceled、context.DeadlineExceeded
+// 或 net.Error 的实现，其中 Timeout() 为 true。
 type errTimeout struct {
 	err error
 }

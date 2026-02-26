@@ -21,15 +21,16 @@ func TestContextWatcherContextCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cw.Watch(ctx)
-	cancel()
+	cancel() // 对 context 进行取消，确保 onCancel() 被调用
 
+	// 期望 1s 内 onCancel() 被调用，超过1s时，测试失败
 	select {
 	case <-canceledChan:
 	case <-time.NewTimer(time.Second).C:
 		t.Fatal("Timed out waiting for cancel func to be called")
 	}
 
-	cw.Unwatch()
+	cw.Unwatch() // 对 context 进行 unwatch，确保 onUnwatchAfterCancel() 被调用
 
 	require.True(t, cleanupCalled, "Cleanup func was not called")
 }

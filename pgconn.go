@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgproto3/v2"
 )
 
+// pgConn 的连接状态
 const (
 	connStatusUninitialized = iota
 	connStatusConnecting
