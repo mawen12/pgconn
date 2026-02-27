@@ -30,6 +30,10 @@ type GetSSLPasswordFunc func(ctx context.Context) string
 
 // Config is the settings used to establish a connection to a PostgreSQL server. It must be created by ParseConfig. A
 // manually initialized Config will cause ConnectConfig to panic.
+
+// Config 是一个用于与 PostgreSQL 服务器建立连接的设置。
+// 它必须由 ParseConfig 创建。
+// 手动初始化的 Config 将导致 ConnectConfig panic。
 type Config struct {
 	Host           string // host (e.g. localhost) or absolute path to unix domain socket directory (e.g. /private/tmp)
 	Port           uint16
@@ -162,28 +166,28 @@ func NetworkAddress(host string, port uint16) (network, address string) {
 // values that will be tried in order. This can be used as part of a high availability system. See
 // https://www.postgresql.org/docs/11/libpq-connect.html#LIBPQ-MULTIPLE-HOSTS for more information.
 //
-//   # Example URL
-//   postgres://jack:secret@foo.example.com:5432,bar.example.com:5432/mydb
+//	# Example URL
+//	postgres://jack:secret@foo.example.com:5432,bar.example.com:5432/mydb
 //
 // ParseConfig currently recognizes the following environment variable and their parameter key word equivalents passed
 // via database URL or DSN:
 //
-//   PGHOST
-//   PGPORT
-//   PGDATABASE
-//   PGUSER
-//   PGPASSWORD
-//   PGPASSFILE
-//   PGSERVICE
-//   PGSERVICEFILE
-//   PGSSLMODE
-//   PGSSLCERT
-//   PGSSLKEY
-//   PGSSLROOTCERT
-//   PGSSLPASSWORD
-//   PGAPPNAME
-//   PGCONNECT_TIMEOUT
-//   PGTARGETSESSIONATTRS
+//	PGHOST
+//	PGPORT
+//	PGDATABASE
+//	PGUSER
+//	PGPASSWORD
+//	PGPASSFILE
+//	PGSERVICE
+//	PGSERVICEFILE
+//	PGSSLMODE
+//	PGSSLCERT
+//	PGSSLKEY
+//	PGSSLROOTCERT
+//	PGSSLPASSWORD
+//	PGAPPNAME
+//	PGCONNECT_TIMEOUT
+//	PGTARGETSESSIONATTRS
 //
 // See http://www.postgresql.org/docs/11/static/libpq-envars.html for details on the meaning of environment variables.
 //
@@ -212,11 +216,17 @@ func NetworkAddress(host string, port uint16) (network, address string) {
 //
 // In addition, ParseConfig accepts the following options:
 //
-//  min_read_buffer_size
-//    The minimum size of the internal read buffer. Default 8192.
-//  servicefile
-//    libpq only reads servicefile from the PGSERVICEFILE environment variable. ParseConfig accepts servicefile as a
-//    part of the connection string.
+//	min_read_buffer_size
+//	  The minimum size of the internal read buffer. Default 8192.
+//	servicefile
+//	  libpq only reads servicefile from the PGSERVICEFILE environment variable. ParseConfig accepts servicefile as a
+//	  part of the connection string.
+
+// ParseConfig 从 connString 构建一个 *Config，行为类似于 PostgreSQL 标准 C 库 libpq。
+// 它使用与 libpq 相同的默认值（例如： port=5432）和理解大多数 PG* 环境变量。
+// ParseConfig 紧密匹配 libpq 的解析行为。connString 可以是 URL 格式或关键字=值格式（DSN 样式）。
+// 有关详细信息，请参阅 https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING。
+// connString 也可以为空，以仅从环境中读取。如果未提供密码，它将尝试读取 .pgpass 文件。
 func ParseConfig(connString string) (*Config, error) {
 	var parseConfigOptions ParseConfigOptions
 	return ParseConfigWithOptions(connString, parseConfigOptions)

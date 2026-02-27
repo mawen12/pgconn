@@ -37,6 +37,8 @@ func TestConnect(t *testing.T) {
 		{"SCRAM password", "PGX_TEST_SCRAM_PASSWORD_CONN_STRING"},
 	}
 
+	os.Setenv("PGX_TEST_UNIX_SOCKET_CONN_STRING", "host=/var/run/postgresql dbname=pgx_test")
+
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {

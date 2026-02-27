@@ -26,4 +26,29 @@ method immediately returns. In most circumstances, this will close the underlyin
 The CancelRequest method may be used to request the PostgreSQL server cancel an in-progress query without forcing the
 client to abort.
 */
+
+// pgconn 包是一个低级的 PostgreSQL 数据库驱动程序。
+//
+// pgconn 提供了比 database/sql 或 pgx 连接更低级别访问 PostgreSQL 连接的功能。
+// 它的操作级别几乎与 C 库 libpq 相同。
+//
+// 建立连接
+//
+// 使用 Connect 来建立连接。它接受 URL 或 DSN 格式的连接字符串，并将读取环境中的 libpq 样式环境变量。
+//
+// 执行查询
+//
+// ExecParams 和 ExecPrepared 执行单个查询。他们返回迭代每行的读取器。Read 方法将所有行读入内存。
+//
+// 在单个往返中执行多个查询
+//
+// Exec 和 ExecBatch 可以在单个往返中执行多个查询。他们返回迭代每个查询结果的读取器。
+// ReadAll 方法将所有查询结果读入内存。
+//
+// 上下文支持
+//
+// 所有可能阻塞的操作都接受 context.Context。如果在方法执行过程中取消了上下文，方法将立即返回。
+// 在大多数情况下，这将关闭底层连接。
+//
+// CancelRequest 方法可用于请求 PostgreSQL 服务器取消正在进行的查询，而不强制客户端中止。
 package pgconn

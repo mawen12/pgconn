@@ -21,7 +21,29 @@ import (
 	"github.com/jackc/pgproto3/v2"
 )
 
-// pgConn 的连接状态
+/*
+connStatus 连接状态
+
+	connStatusUninitialized
+		连接尚未初始化的状态。
+		隐含该连接是关闭状态。
+
+	connStatusConnecting
+		连接中的状态。
+		隐含该连接是关闭状态。
+
+	connStatusClosed
+		连接已被关闭
+
+	connStatusIdle
+		连接空闲状态。
+
+		通过 unlock 将状态从 Busy => Idle。
+
+	connStatusBusy
+		连接繁忙状态，与后端进行通信。
+		通过 lock 将状态从 Idle => Busy。
+*/
 const (
 	connStatusUninitialized = iota
 	connStatusConnecting
@@ -34,9 +56,14 @@ const wbufLen = 1024
 
 // Notice represents a notice response message reported by the PostgreSQL server. Be aware that this is distinct from
 // LISTEN/NOTIFY notification.
+
+// Notice 表示 PostgreSQL 服务器报告的 notice response 消息。
+// 请注意，这与 LISTEN/NOTIFY 通知不同。
 type Notice PgError
 
 // Notification is a message received from the PostgreSQL LISTEN/NOTIFY system
+
+// Notification 是从 PostgreSQL LISTEN/NOTIFY 系统接收的消息。
 type Notification struct {
 	PID     uint32 // backend pid that sent the notification
 	Channel string // channel from which notification was received
@@ -44,40 +71,108 @@ type Notification struct {
 }
 
 // DialFunc is a function that can be used to connect to a PostgreSQL server.
+
+// DialFunc 是是一个函数，可以用来连接到 PostgreSQL 服务器。
 type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // LookupFunc is a function that can be used to lookup IPs addrs from host. Optionally an ip:port combination can be
 // returned in order to override the connection string's port.
+
+// LookupFunc 是一个函数，可以用来从主机查找 IP 地址。
+// 可选地，可以返回 ip:port 组合，以覆盖连接字符串的端口。
 type LookupFunc func(ctx context.Context, host string) (addrs []string, err error)
 
 // BuildFrontendFunc is a function that can be used to create Frontend implementation for connection.
+
+// BuildFrontendFunc 是一个函数，可以用来为连接创建 Frontend 实现。
 type BuildFrontendFunc func(r io.Reader, w io.Writer) Frontend
 
 // NoticeHandler is a function that can handle notices received from the PostgreSQL server. Notices can be received at
 // any time, usually during handling of a query response. The *PgConn is provided so the handler is aware of the origin
 // of the notice, but it must not invoke any query method. Be aware that this is distinct from LISTEN/NOTIFY
 // notification.
+
+// NoticeHandler 是一个函数，可以用来处理从 PostgreSQL 服务器接收的 notice。
+// Notices 可以在任何时候接收，通常是在处理查询响应期间接收的。
+// *PgConn 被提供给处理程序，以便处理知道 notice 的来源，但是它不能调用任何查询方法。
+// 请注意，这与 LISTEN/NOTIFY 通知不同。
 type NoticeHandler func(*PgConn, *Notice)
 
 // NotificationHandler is a function that can handle notifications received from the PostgreSQL server. Notifications
 // can be received at any time, usually during handling of a query response. The *PgConn is provided so the handler is
 // aware of the origin of the notice, but it must not invoke any query method. Be aware that this is distinct from a
 // notice event.
+
+// NotificationHandler 是一个函数，可以用来处理从 PostgreSQL 服务器接收的通知。
+// Notifications 可以在任何时候接收，通常是在处理查询响应期间接收的。
+// *PgConn 被提供给处理，以便知道 notifce 的来源，但是它不能调用任何查询方法。
+// 请注意，这与 notice 事件不同。
 type NotificationHandler func(*PgConn, *Notification)
 
 // Frontend used to receive messages from backend.
+
+// Frontend 用于接收来自 backend 的消息
 type Frontend interface {
 	Receive() (pgproto3.BackendMessage, error)
 }
 
 // PgConn is a low-level PostgreSQL connection handle. It is not safe for concurrent usage.
+
+/*
+PgConn 是一个低级别的 PostgreSQL 连接句柄，它不支持并发使用。
+
+	conn
+		底层的 TCP 或 unix socket 连接
+
+	pid
+		backend（PostgreSQL） 的进程 ID
+
+	secretKey
+		发送取消查询消息到服务器的密钥
+
+	parameterStatuses
+		服务器报告的参数
+
+	txStatus
+
+	frontend
+		前端，Receive() 用来解析字节为 Backend
+
+	config
+		配置
+
+	status
+		连接状态，初始为0,等于connStatusUninitialized。
+
+	bufferingReceive
+
+
+	bufferingReceiveMux
+
+	bufferingReceiveMsg
+
+	bufferingReceiveErr
+
+	peekedMsg
+
+
+	wbuf
+
+	resultReader
+
+	multiResultReader
+
+	contextWatcher
+
+	cleanupDone
+*/
 type PgConn struct {
-	conn              net.Conn          // the underlying TCP or unix domain socket connection
-	pid               uint32            // backend pid
-	secretKey         uint32            // key to use to send a cancel query message to the server
-	parameterStatuses map[string]string // parameters that have been reported by the server
+	conn              net.Conn          // the underlying TCP or unix domain socket connection 底层的 TCP 或 unix 域套接字连接
+	pid               uint32            // backend pid 后端进程 ID
+	secretKey         uint32            // key to use to send a cancel query message to the server 发送取消查询消息到服务器的密钥
+	parameterStatuses map[string]string // parameters that have been reported by the server 服务器报告的参数
 	txStatus          byte
-	frontend          Frontend
+	frontend          Frontend // 前端，用于接收来自后端的消息
 
 	config *Config
 
@@ -88,7 +183,7 @@ type PgConn struct {
 	bufferingReceiveMsg pgproto3.BackendMessage
 	bufferingReceiveErr error
 
-	peekedMsg pgproto3.BackendMessage
+	peekedMsg pgproto3.BackendMessage // 获取的但尚未处理的消息
 
 	// Reusable / preallocated resources
 	wbuf              []byte // write buffer
@@ -101,6 +196,9 @@ type PgConn struct {
 
 // Connect establishes a connection to a PostgreSQL server using the environment and connString (in URL or DSN format)
 // to provide configuration. See documentation for ParseConfig for details. ctx can be used to cancel a connect attempt.
+
+// Connect 使用环境和连接字符串（以 URL 或 DSN 格式）提供配置来连接到 PostgreSQL 服务器。
+// 有关详细信息，请参阅 ParseConfig 的文档。ctx 可用于取消连接尝试。
 func Connect(ctx context.Context, connString string) (*PgConn, error) {
 	config, err := ParseConfig(connString)
 	if err != nil {
@@ -262,12 +360,13 @@ func expandWithIPs(ctx context.Context, lookupFn LookupFunc, fallbacks []*Fallba
 func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig,
 	ignoreNotPreferredErr bool) (*PgConn, error) {
 	pgConn := new(PgConn)
-	pgConn.config = config
-	pgConn.wbuf = make([]byte, 0, wbufLen)
-	pgConn.cleanupDone = make(chan struct{})
+	pgConn.config = config                   // 配置
+	pgConn.wbuf = make([]byte, 0, wbufLen)   // 写缓冲区
+	pgConn.cleanupDone = make(chan struct{}) // 清理完成的信号通道
 
 	var err error
 	network, address := NetworkAddress(fallbackConfig.Host, fallbackConfig.Port)
+	// 开始连接
 	netConn, err := config.DialFunc(ctx, network, address)
 	if err != nil {
 		var netErr net.Error
@@ -319,12 +418,15 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 	if err != nil {
 		return nil, &connectError{config: config, msg: "failed to write startup message", err: err}
 	}
+	// 发送 StartupMessage
 	if _, err := pgConn.conn.Write(buf); err != nil {
 		pgConn.conn.Close()
 		return nil, &connectError{config: config, msg: "failed to write startup message", err: err}
 	}
 
+	// 处理 StartupMessage 对应的响应
 	for {
+		// 读取消息
 		msg, err := pgConn.receiveMessage()
 		if err != nil {
 			pgConn.conn.Close()
@@ -335,25 +437,25 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 		}
 
 		switch msg := msg.(type) {
-		case *pgproto3.BackendKeyData:
+		case *pgproto3.BackendKeyData: // 处理 BackendKeyData，从其中获取可以发出取消查询的 secretKey
 			pgConn.pid = msg.ProcessID
 			pgConn.secretKey = msg.SecretKey
 
-		case *pgproto3.AuthenticationOk:
-		case *pgproto3.AuthenticationCleartextPassword:
+		case *pgproto3.AuthenticationOk: // 认证成功不做处理，但是继续监听 BackendKeyData、ReadyForQuery
+		case *pgproto3.AuthenticationCleartextPassword: // 使用明文密码构造 PasswordMessage，并发送到 Backend
 			err = pgConn.txPasswordMessage(pgConn.config.Password)
 			if err != nil {
 				pgConn.conn.Close()
 				return nil, &connectError{config: config, msg: "failed to write password message", err: err}
 			}
-		case *pgproto3.AuthenticationMD5Password:
+		case *pgproto3.AuthenticationMD5Password: // 使用 MD5 加密用户名和密码，并使用 Salt 进行二次加密，构造 PasswordMessage，并发送到 Backend
 			digestedPassword := "md5" + hexMD5(hexMD5(pgConn.config.Password+pgConn.config.User)+string(msg.Salt[:]))
 			err = pgConn.txPasswordMessage(digestedPassword)
 			if err != nil {
 				pgConn.conn.Close()
 				return nil, &connectError{config: config, msg: "failed to write password message", err: err}
 			}
-		case *pgproto3.AuthenticationSASL:
+		case *pgproto3.AuthenticationSASL: //
 			err = pgConn.scramAuth(msg.AuthMechanisms)
 			if err != nil {
 				pgConn.conn.Close()
@@ -493,22 +595,32 @@ func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
 //
 // This is a very low level method that requires deep understanding of the PostgreSQL wire protocol to use correctly.
 // See https://www.postgresql.org/docs/current/protocol.html.
+
+// ReceiveMessage 从 PostgreSQL 服务器接收一个协议消息。
+// 该方法仅在连接非 Busy 状态时被使用。
+// 在读取查询结果时，调用该方法是一个错误。
+// 这些消息仍然由核心 pgconn 消息处理系统处理，因此收到 NotificationResponse 仍然会触发 OnNotification 回调
 func (pgConn *PgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessage, error) {
+	// 从 Idle => Busy
 	if err := pgConn.lock(); err != nil {
 		return nil, err
 	}
+	// 退出时从 Busy => Idle
 	defer pgConn.unlock()
 
+	// 检查 ctx 是否已被取消
 	if ctx != context.Background() {
 		select {
 		case <-ctx.Done():
 			return nil, newContextAlreadyDoneError(ctx)
 		default:
 		}
+		// 监听 ctx
 		pgConn.contextWatcher.Watch(ctx)
 		defer pgConn.contextWatcher.Unwatch()
 	}
 
+	// 接收一条消息
 	msg, err := pgConn.receiveMessage()
 	if err != nil {
 		err = &pgconnError{
@@ -520,6 +632,10 @@ func (pgConn *PgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessa
 }
 
 // peekMessage peeks at the next message without setting up context cancellation.
+
+// peekMessage 会在不设置上下文取消的情况下查看下一条消息
+//
+// 底层使用 [PgConn.frontend] 来对消息协议进行处理
 func (pgConn *PgConn) peekMessage() (pgproto3.BackendMessage, error) {
 	if pgConn.peekedMsg != nil {
 		return pgConn.peekedMsg, nil
@@ -527,6 +643,8 @@ func (pgConn *PgConn) peekMessage() (pgproto3.BackendMessage, error) {
 
 	var msg pgproto3.BackendMessage
 	var err error
+
+	//
 	if pgConn.bufferingReceive {
 		pgConn.bufferingReceiveMux.Lock()
 		msg = pgConn.bufferingReceiveMsg
@@ -540,6 +658,7 @@ func (pgConn *PgConn) peekMessage() (pgproto3.BackendMessage, error) {
 			msg, err = pgConn.frontend.Receive()
 		}
 	} else {
+		// 直接使用前端读取
 		msg, err = pgConn.frontend.Receive()
 	}
 
@@ -559,7 +678,10 @@ func (pgConn *PgConn) peekMessage() (pgproto3.BackendMessage, error) {
 }
 
 // receiveMessage receives a message without setting up context cancellation
+
+// receiveMessage 接收一个消息，但不触发 context 取消
 func (pgConn *PgConn) receiveMessage() (pgproto3.BackendMessage, error) {
+	// 读取消息
 	msg, err := pgConn.peekMessage()
 	if err != nil {
 		// Close on anything other than timeout error - everything else is fatal
@@ -573,6 +695,7 @@ func (pgConn *PgConn) receiveMessage() (pgproto3.BackendMessage, error) {
 	}
 	pgConn.peekedMsg = nil
 
+	// 处理读取到的消息
 	switch msg := msg.(type) {
 	case *pgproto3.ReadyForQuery:
 		pgConn.txStatus = msg.TxStatus
@@ -710,6 +833,7 @@ func (pgConn *PgConn) IsBusy() bool {
 }
 
 // lock locks the connection.
+// lock 将连接状态从 Idle 置为 Busy
 func (pgConn *PgConn) lock() error {
 	switch pgConn.status {
 	case connStatusBusy:
@@ -723,6 +847,7 @@ func (pgConn *PgConn) lock() error {
 	return nil
 }
 
+// unlock 将连接状态从 Busy 置为 Idle
 func (pgConn *PgConn) unlock() {
 	switch pgConn.status {
 	case connStatusBusy:
@@ -1446,6 +1571,21 @@ func (pgConn *PgConn) CopyFrom(ctx context.Context, r io.Reader, sql string) (Co
 }
 
 // MultiResultReader is a reader for a command that could return multiple results such as Exec or ExecBatch.
+
+/*
+MultiResultReader 是一个 reader，用于读取可以返回多个结果的命令，比如 Exec 和 ExecBatch
+
+	pgConn
+		与 PostgreSQL 的连接，通过多次调用 receiveMessage 方法可以读取多条 Message
+
+	ctx
+
+	rr
+
+	closed
+
+	err
+*/
 type MultiResultReader struct {
 	pgConn *PgConn
 	ctx    context.Context
@@ -1457,12 +1597,17 @@ type MultiResultReader struct {
 }
 
 // ReadAll reads all available results. Calling ReadAll is mutually exclusive with all other MultiResultReader methods.
+
+// ReadAll 读取所有可用的结果。调用 ReadAll 方法与其他所有 MultiResultReader 方法互斥。
 func (mrr *MultiResultReader) ReadAll() ([]*Result, error) {
 	var results []*Result
 
+	// 循环一直读取下一条消息
 	for mrr.NextResult() {
+		// 追加记录消息
 		results = append(results, mrr.ResultReader().Read())
 	}
+	// 关闭
 	err := mrr.Close()
 
 	return results, err
@@ -1492,13 +1637,29 @@ func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) 
 }
 
 // NextResult returns advances the MultiResultReader to the next result and returns true if a result is available.
+
+// NextResult 返回值将 MultiResultReader 推进到下一个结果，如果存在结果则返回 true。
 func (mrr *MultiResultReader) NextResult() bool {
+	// 只有未关闭，且没有错误，才能一直读取
 	for !mrr.closed && mrr.err == nil {
+		// 使用 pgConn 读取一条消息
 		msg, err := mrr.receiveMessage()
 		if err != nil {
 			return false
 		}
 
+		/*
+			处理不同类型的消息
+
+				RowDescription
+
+
+				CommandComplete
+					命令执行结束，跳出，可以继续读取
+
+				EmptyQueryResponse
+					没有查询结果，结束，不可继续读取
+		*/
 		switch msg := msg.(type) {
 		case *pgproto3.RowDescription:
 			mrr.pgConn.resultReader = ResultReader{
@@ -1543,6 +1704,28 @@ func (mrr *MultiResultReader) Close() error {
 }
 
 // ResultReader is a reader for the result of a single query.
+
+/*
+ResultReader 是一个读取器，用于读取单个查询的结果。
+
+	pgConn
+
+	multiResultReader
+
+	ctx
+
+	fieldDescriptions
+
+	rowValues
+
+	commandTag
+
+	commandConcluded
+
+	closed
+
+	err
+*/
 type ResultReader struct {
 	pgConn            *PgConn
 	multiResultReader *MultiResultReader
