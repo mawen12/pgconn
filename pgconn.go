@@ -155,12 +155,13 @@ PgConn 是一个低级别的 PostgreSQL 连接句柄，它不支持并发使用�
 
 	peekedMsg
 
-
 	wbuf
 
 	resultReader
+		单条结果阅读器
 
 	multiResultReader
+		多条结果阅读器
 
 	contextWatcher
 
@@ -467,7 +468,7 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 				pgConn.conn.Close()
 				return nil, &connectError{config: config, msg: "failed GSS auth", err: err}
 			}
-		case *pgproto3.ReadyForQuery:
+		case *pgproto3.ReadyForQuery: // 可以开始发出其它命令了
 			pgConn.status = connStatusIdle
 			if config.ValidateConnect != nil {
 				// ValidateConnect may execute commands that cause the context to be watched again. Unwatch first to avoid
@@ -1159,8 +1160,9 @@ func (pgConn *PgConn) Exec(ctx context.Context, sql string) *MultiResultReader {
 		}
 	}
 
+	// 发送 Query 消息
 	n, err := pgConn.conn.Write(buf)
-	if err != nil {
+	if err != nil { // 处理发送错误
 		pgConn.asyncClose()
 		pgConn.contextWatcher.Unwatch()
 		multiResult.closed = true
@@ -1224,6 +1226,33 @@ func (pgConn *PgConn) ReceiveResults(ctx context.Context) *MultiResultReader {
 // binary format. If resultFormats is nil all results will be in text format.
 //
 // ResultReader must be closed before PgConn can be used again.
+
+/*
+ExecParams 通过 PostgreSQL 扩展查询协议执行命令。
+
+	sql
+		是 SQL 命令字符串，可能只包含一个查询。参数是按位置替换的，使用 $1, $2, $3，等。
+
+	paramValues
+		参数值，它必须按照 paramFormats 指定的格式进行编码。
+
+	paramIODs
+		是 paramValues 的 OID 数据类型切片。如果 paramOIDs 为 nil，服务器将推断所有参数的数据类型。
+		任何值为 0 的 paramOID 元素都会导致服务器推断该参数的数据类型。如果 len(paramOIDs) 不等于 0、
+		1 或 len(paramValues)，ExecParams 将引发 panic。
+
+	paramFormats
+		是一个格式代码切片，用于确定每个 paramValue 列是以文本格式还是二进制格式编码。
+		如果 paramFormats 为 nil，这所有参数均为文本格式。如果 len(paramFormats) 不等于 0、1 或
+		len(paramValues)，则 ExecParams 将引发 panic。
+
+	resultFormats
+		是一个格式代码切片，用于确定每个结果列是以文本格式还是二进制格式编码。
+		如果 resultFormats 为 nil，则所有结果都将以文本格式显示。
+
+	ResultReader
+		必须先关闭，才能再次使用 PgConn。
+*/
 func (pgConn *PgConn) ExecParams(ctx context.Context, sql string, paramValues [][]byte, paramOIDs []uint32, paramFormats []int16, resultFormats []int16) *ResultReader {
 	result := pgConn.execExtendedPrefix(ctx, paramValues)
 	if result.closed {
@@ -1709,8 +1738,10 @@ func (mrr *MultiResultReader) Close() error {
 ResultReader 是一个读取器，用于读取单个查询的结果。
 
 	pgConn
+		与 PostgreSQL 的连接，通过调用 receiveMessage 方法可以读取 Message
 
 	multiResultReader
+		同时读取多条消息
 
 	ctx
 
@@ -1748,28 +1779,38 @@ type Result struct {
 }
 
 // Read saves the query response to a Result.
+
+// Read 将查询响应保存到 Result
 func (rr *ResultReader) Read() *Result {
 	br := &Result{}
 
+	// 持续读取行记录
 	for rr.NextRow() {
+		// 复制字段描述
 		if br.FieldDescriptions == nil {
 			br.FieldDescriptions = make([]pgproto3.FieldDescription, len(rr.FieldDescriptions()))
 			copy(br.FieldDescriptions, rr.FieldDescriptions())
 		}
 
+		// 构造记录
 		row := make([][]byte, len(rr.Values()))
+		// 保存记录
 		copy(row, rr.Values())
 		br.Rows = append(br.Rows, row)
 	}
 
+	// 关闭 reader
 	br.CommandTag, br.Err = rr.Close()
 
 	return br
 }
 
 // NextRow advances the ResultReader to the next row and returns true if a row is available.
+
+// NextRow 将 ResultReader 推进到下一行，如果有行可用，则返回 true
 func (rr *ResultReader) NextRow() bool {
 	for !rr.commandConcluded {
+		// 读取消息
 		msg, err := rr.receiveMessage()
 		if err != nil {
 			return false
@@ -1800,7 +1841,10 @@ func (rr *ResultReader) Values() [][]byte {
 
 // Close consumes any remaining result data and returns the command tag or
 // error.
+
+// Close 消费任何保留的结果数据，并返回 command 标记或错误
 func (rr *ResultReader) Close() (CommandTag, error) {
+	// 已关闭则直接范围
 	if rr.closed {
 		return rr.commandTag, rr.err
 	}
