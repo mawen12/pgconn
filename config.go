@@ -34,6 +34,69 @@ type GetSSLPasswordFunc func(ctx context.Context) string
 // Config 是一个用于与 PostgreSQL 服务器建立连接的设置。
 // 它必须由 ParseConfig 创建。
 // 手动初始化的 Config 将导致 ConnectConfig panic。
+
+/*
+Config 是一个用于与 PostgreSQL 服务器建立连接的设置。
+
+	它必须由 ParseConfig 创建。
+	手动初始化的 Config 将导致 ConnectConfig panic。
+
+	Host
+		连接的主机
+
+	Port
+		连接的主机端口
+
+	Database
+		访问的数据库
+
+	User
+		用户名
+
+	Password
+		密码
+
+	TLSConfig
+		TLS 加密连接，nil 表示禁用
+
+	ConnectTimeout
+		连接超时时间
+
+	DialFunc
+		连接函数
+
+	LookupFunc
+		解析查找主机函数
+
+	BuildFrontend
+		构建分析 Frontend 消息的函数
+
+	RuntimeParams
+		运行时参数，设值到链接上，作为默认值
+
+	KerberosSrvName
+	KerberosSpn
+	Fallbacks
+		回退配置，用于当某些配置未提供时使用
+
+	ValidateConnect
+		在与 PostgreSQL 服务器连接尝试认证成功之后调用。
+		可被用于校验服务器是否可接受。如果调用返回错误，那么连接将被关闭，并尝试下一个 Fallback。
+		这允许实现如 libpq 使用 target_session_attrs 那样的高可用行为。
+
+	AfterConnect
+		在 ValidateConnect 之后调用，它可以用于设置连接（如设置 Session 变量或预编译语句）。
+		如果返回错误，则连接尝试失败。
+
+	OnNotice
+		当接收到 notice response 后的回调函数
+
+	OnNotification
+		当来自 LISTEN/NOTIFY 系统的通知被接收后的回调函数。
+
+	createdByParseConfig
+		用于强制执行 ParseConfig 规则。
+*/
 type Config struct {
 	Host           string // host (e.g. localhost) or absolute path to unix domain socket directory (e.g. /private/tmp)
 	Port           uint16
@@ -107,6 +170,9 @@ func (c *Config) Copy() *Config {
 
 // FallbackConfig is additional settings to attempt a connection with when the primary Config fails to establish a
 // network connection. It is used for TLS fallback such as sslmode=prefer and high availability (HA) connections.
+
+// FallbackConfig 是一个额外的配置，当主配置无法建立网络连接时，将尝试用它来尝试。
+// 它被用于 TLS 回退，如 sslmode=prefer 和 高可用连接。
 type FallbackConfig struct {
 	Host      string // host (e.g. localhost) or path to unix domain socket directory (e.g. /private/tmp)
 	Port      uint16
@@ -134,6 +200,8 @@ func isAbsolutePath(path string) bool {
 
 // NetworkAddress converts a PostgreSQL host and port into network and address suitable for use with
 // net.Dial.
+
+// NetwordAddress 将 PostgreSQL 主机和端口，转换为满足 net.Dial 使用的 network 和 address。
 func NetworkAddress(host string, port uint16) (network, address string) {
 	if isAbsolutePath(host) {
 		network = "unix"
@@ -236,14 +304,19 @@ func ParseConfig(connString string) (*Config, error) {
 // C library libpq. options contains settings that cannot be specified in a connString such as providing a function to
 // get the SSL password.
 func ParseConfigWithOptions(connString string, options ParseConfigOptions) (*Config, error) {
+	// 读取默认配置
 	defaultSettings := defaultSettings()
+	// 读取环境变量
 	envSettings := parseEnvSettings()
 
+	// 保存从 connString 解析的配置
 	connStringSettings := make(map[string]string)
 	if connString != "" {
 		var err error
 		// connString may be a database URL or a DSN
+		// 处理 databaseURL / DSN 的情况
 		if strings.HasPrefix(connString, "postgres://") || strings.HasPrefix(connString, "postgresql://") {
+			//
 			connStringSettings, err = parseURLSettings(connString)
 			if err != nil {
 				return nil, &parseConfigError{connString: connString, msg: "failed to parse as URL", err: err}
@@ -453,32 +526,42 @@ func parseEnvSettings() map[string]string {
 	return settings
 }
 
+// 将 connString 作为 URL 来解析，如：postgre://
 func parseURLSettings(connString string) (map[string]string, error) {
+	// 保存解析结果
 	settings := make(map[string]string)
 
+	// 开始解析
 	url, err := url.Parse(connString)
 	if err != nil {
 		return nil, err
 	}
 
 	if url.User != nil {
+		// 保存用户名
 		settings["user"] = url.User.Username()
+
 		if password, present := url.User.Password(); present {
+			// 保存密码
 			settings["password"] = password
 		}
 	}
 
 	// Handle multiple host:port's in url.Host by splitting them into host,host,host and port,port,port.
+	// 处理多个 host:port 的场景，将它们分别映射到 host,host,host 和 port, port, port
 	var hosts []string
 	var ports []string
 	for _, host := range strings.Split(url.Host, ",") {
+		// 忽略空字符串
 		if host == "" {
 			continue
 		}
+		// 处理 ipv6 的场景
 		if isIPOnly(host) {
 			hosts = append(hosts, strings.Trim(host, "[]"))
 			continue
 		}
+		// 拆分 ip + port
 		h, p, err := net.SplitHostPort(host)
 		if err != nil {
 			return nil, fmt.Errorf("failed to split host:port in '%s', err: %w", host, err)
@@ -497,6 +580,7 @@ func parseURLSettings(connString string) (map[string]string, error) {
 		settings["port"] = strings.Join(ports, ",")
 	}
 
+	// 去除 /
 	database := strings.TrimLeft(url.Path, "/")
 	if database != "" {
 		settings["database"] = database
@@ -506,6 +590,7 @@ func parseURLSettings(connString string) (map[string]string, error) {
 		"dbname": "database",
 	}
 
+	// 解析参数
 	for k, v := range url.Query() {
 		if k2, present := nameMap[k]; present {
 			k = k2
@@ -517,12 +602,14 @@ func parseURLSettings(connString string) (map[string]string, error) {
 	return settings, nil
 }
 
+// isIPOnly 是否仅包含ip，而没有端口
 func isIPOnly(host string) bool {
 	return net.ParseIP(strings.Trim(host, "[]")) != nil || !strings.Contains(host, ":")
 }
 
 var asciiSpace = [256]uint8{'\t': 1, '\n': 1, '\v': 1, '\f': 1, '\r': 1, ' ': 1}
 
+// 解析 dsn
 func parseDSNSettings(s string) (map[string]string, error) {
 	settings := make(map[string]string)
 

@@ -833,7 +833,7 @@ func (pgConn *PgConn) IsBusy() bool {
 }
 
 // lock locks the connection.
-// lock 将连接状态从 Idle 置为 Busy
+// lock 将连接状态从 Idle/Connecting 置为 Busy
 func (pgConn *PgConn) lock() error {
 	switch pgConn.status {
 	case connStatusBusy:
