@@ -1608,12 +1608,16 @@ MultiResultReader 是一个 reader，用于读取可以返回多个结果的命�
 		与 PostgreSQL 的连接，通过多次调用 receiveMessage 方法可以读取多条 Message
 
 	ctx
+		支持调用取消
 
 	rr
+		单条记录读取器
 
 	closed
+		是否关闭标识
 
 	err
+		执行过程中的错误
 */
 type MultiResultReader struct {
 	pgConn *PgConn
@@ -1643,8 +1647,10 @@ func (mrr *MultiResultReader) ReadAll() ([]*Result, error) {
 }
 
 func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) {
+	// 读取消息
 	msg, err := mrr.pgConn.receiveMessage()
 
+	// 出现错误时，关闭并退出
 	if err != nil {
 		mrr.pgConn.contextWatcher.Unwatch()
 		mrr.err = preferContextOverNetTimeoutError(mrr.ctx, err)
@@ -1653,6 +1659,7 @@ func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) 
 		return nil, mrr.err
 	}
 
+	// 处理 ReadForQuery / ErrorResponse
 	switch msg := msg.(type) {
 	case *pgproto3.ReadyForQuery:
 		mrr.pgConn.contextWatcher.Unwatch()
@@ -1744,18 +1751,25 @@ ResultReader 是一个读取器，用于读取单个查询的结果。
 		同时读取多条消息
 
 	ctx
+		支持取消
 
 	fieldDescriptions
+		保存字段描述
 
 	rowValues
+		保持行值
 
 	commandTag
+		保存标记
 
 	commandConcluded
+		commandTag 读取是否结束的标志位，当读取到 commandTag 或者出现错误时，改为 true。
 
 	closed
+		关闭标识
 
 	err
+		捕获执行过程中出现的错误
 */
 type ResultReader struct {
 	pgConn            *PgConn
@@ -1771,6 +1785,8 @@ type ResultReader struct {
 }
 
 // Result is the saved query response that is returned by calling Read on a ResultReader.
+
+// Result 是保存的 query 响应，当调用 ResultReader.Read 方法时返回
 type Result struct {
 	FieldDescriptions []pgproto3.FieldDescription
 	Rows              [][][]byte
@@ -1786,7 +1802,7 @@ func (rr *ResultReader) Read() *Result {
 
 	// 持续读取行记录
 	for rr.NextRow() {
-		// 复制字段描述
+		// 仅在第一次时复制字段描述
 		if br.FieldDescriptions == nil {
 			br.FieldDescriptions = make([]pgproto3.FieldDescription, len(rr.FieldDescriptions()))
 			copy(br.FieldDescriptions, rr.FieldDescriptions())
@@ -1809,6 +1825,7 @@ func (rr *ResultReader) Read() *Result {
 
 // NextRow 将 ResultReader 推进到下一行，如果有行可用，则返回 true
 func (rr *ResultReader) NextRow() bool {
+	// 只要没读取到 commandTag 或错误时，持续读取
 	for !rr.commandConcluded {
 		// 读取消息
 		msg, err := rr.receiveMessage()
@@ -1816,6 +1833,7 @@ func (rr *ResultReader) NextRow() bool {
 			return false
 		}
 
+		// 仅读取行数据
 		switch msg := msg.(type) {
 		case *pgproto3.DataRow:
 			rr.rowValues = msg.Values
@@ -1842,7 +1860,18 @@ func (rr *ResultReader) Values() [][]byte {
 // Close consumes any remaining result data and returns the command tag or
 // error.
 
-// Close 消费任何保留的结果数据，并返回 command 标记或错误
+//
+// - 如果已关闭，则直接返回
+// - 读取消息，直到是 ErrorResponse / ReadyForQuery
+// 		ErrorResponse
+//		ReadyForQuery
+
+/*
+Close 消费任何保留的结果数据，并返回 command 标记或错误
+
+	1.如果已关闭，则直接返回上次的结果
+	2.
+*/
 func (rr *ResultReader) Close() (CommandTag, error) {
 	// 已关闭则直接范围
 	if rr.closed {
@@ -1850,6 +1879,7 @@ func (rr *ResultReader) Close() (CommandTag, error) {
 	}
 	rr.closed = true
 
+	// 如果尚未读取到 commandConcluded 时，则循环读取，直到 commandConcluded=true 或出现错误
 	for !rr.commandConcluded {
 		_, err := rr.receiveMessage()
 		if err != nil {
@@ -1857,6 +1887,7 @@ func (rr *ResultReader) Close() (CommandTag, error) {
 		}
 	}
 
+	//
 	if rr.multiResultReader == nil {
 		for {
 			msg, err := rr.receiveMessage()
@@ -1882,6 +1913,7 @@ func (rr *ResultReader) Close() (CommandTag, error) {
 // readUntilRowDescription ensures the ResultReader's fieldDescriptions are loaded. It does not return an error as any
 // error will be stored in the ResultReader.
 func (rr *ResultReader) readUntilRowDescription() {
+	// 当读取到 err, ErrorResponse, CommandDone, EmptyQueryResponse 时退出
 	for !rr.commandConcluded {
 		// Peek before receive to avoid consuming a DataRow if the result set does not include a RowDescription method.
 		// This should never happen under normal pgconn usage, but it is possible if SendBytes and ReceiveResults are
@@ -1891,21 +1923,39 @@ func (rr *ResultReader) readUntilRowDescription() {
 			return
 		}
 
-		// Consume the message
 		msg, _ = rr.receiveMessage()
+		// 当读取到 RowDescription 时，退出
 		if _, ok := msg.(*pgproto3.RowDescription); ok {
 			return
 		}
 	}
 }
 
+/*
+receiveMessage 从 pgConn 或 multiResultReader 读取消息，
+当读取出现错误时，将 commandConcluded 置为 true，并保存 err，然后退出。
+
+	RowDescription
+		保存字段
+
+	CommandComplete
+		将 commandConcluded 置为 true，记录 commandTag
+
+	EmptyQueryResponse
+		将 commandConcluded 置为 true
+
+	ErrorResponse
+		将 commandConcluded 置为 true，并保存 err
+*/
 func (rr *ResultReader) receiveMessage() (msg pgproto3.BackendMessage, err error) {
+	// 决定根据谁来读取
 	if rr.multiResultReader == nil {
 		msg, err = rr.pgConn.receiveMessage()
 	} else {
 		msg, err = rr.multiResultReader.receiveMessage()
 	}
 
+	// 处理错误，将 commandConclused 更新为 true，并记录 err
 	if err != nil {
 		err = preferContextOverNetTimeoutError(rr.ctx, err)
 		rr.concludeCommand(nil, err)
@@ -1918,14 +1968,15 @@ func (rr *ResultReader) receiveMessage() (msg pgproto3.BackendMessage, err error
 		return nil, rr.err
 	}
 
+	// 处理 RowDescription
 	switch msg := msg.(type) {
 	case *pgproto3.RowDescription:
 		rr.fieldDescriptions = msg.Fields
-	case *pgproto3.CommandComplete:
+	case *pgproto3.CommandComplete: // 处理 CommandTag
 		rr.concludeCommand(CommandTag(msg.CommandTag), nil)
-	case *pgproto3.EmptyQueryResponse:
+	case *pgproto3.EmptyQueryResponse: // 处理 EmptyQueryResponse
 		rr.concludeCommand(nil, nil)
-	case *pgproto3.ErrorResponse:
+	case *pgproto3.ErrorResponse: // 处理 ErrorResponse
 		rr.concludeCommand(nil, ErrorResponseToPgError(msg))
 	}
 

@@ -53,7 +53,7 @@ ReadAll 方法将所有查询结果读入内存。
 
 CancelRequest 方法可用于请求 PostgreSQL 服务器取消正在进行的查询，而不强制客户端中止。
 
-# 处理流程
+# startup 处理流程
 
 	connect
 		通过 receiveMessage 循环读取消息，直到读取到 ReadyForQuery 或者 ErrorResponse。
@@ -112,5 +112,23 @@ CancelRequest 方法可用于请求 PostgreSQL 服务器取消正在进行的查
 	peekMessage
 		通过 Frontend.Receive 读取消息，然后将读取到的消息保存到 peekedMsg 中。
 		该方法会缓存最近一次读取的消息。对于重复调用会返回最近读取的消息。
+
+# ResultReader 处理流程
+
+	Read
+		读取的方法入口，用于读取列描述和行记录
+
+	NextRow
+		循环读取，直到遇到 err, ErrorResponse, CommandDone, EmptyQueryResponse 后退出
+
+		调用 receiveMessage 来读取 RowDescrition、DataRow。
+		该方法仅处理 DataRow，而在 receiveMessage 中处理 RowDescrition。
+
+	receiveMssage
+
+	close
+		关闭连接，等待 ReadyForQuery / ErrorResponse 响应
+		其中 ReadyForQuery 才能正常将状态改为 idle。
+		而 ErrorResponse 则会捕获并退出。
 */
 package pgconn
